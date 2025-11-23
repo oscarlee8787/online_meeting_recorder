@@ -1,0 +1,5 @@
+{
+  "name": "AutoMeeting Recorder",
+  "description": "An intelligent assistant that parses schedules to automatically join meetings and trigger OBS recordings.",
+  "requestFramePermissions": []
+}
