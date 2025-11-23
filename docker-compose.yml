@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  meeting-agent:
+    build: .
+    container_name: meeting-automation
+    ports:
+      - "3333:3333"  # API endpoint
+      - "5900:5900"  # VNC access for monitoring
+    volumes:
+      - ./browser-data:/app/browser-data
+      - ./logs:/var/log/automation
+    environment:
+      - DISPLAY=:99
+      - PULSE_SERVER=unix:/var/run/pulse/pulse-socket
+      - NODE_ENV=development
+    restart: unless-stopped
+    networks:
+      - meeting-network
+
+networks:
+  meeting-network:
+    driver: bridge

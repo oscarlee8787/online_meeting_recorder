@@ -4,12 +4,18 @@ import OBSConnection from './components/OBSConnection';
 import SmartScheduleInput from './components/SmartScheduleInput';
 import MeetingList from './components/MeetingList';
 import { startRecording, stopRecording } from './services/obsService';
-import { Plus, Layout } from 'lucide-react';
+import automationService from './services/automationService';
+import { Plus, Layout, Bot } from 'lucide-react';
 
 function App() {
   const [obsStatus, setObsStatus] = useState<OBSStatus>(OBSStatus.DISCONNECTED);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [showManualAdd, setShowManualAdd] = useState(false);
+  
+  // Automation state
+  const [automationEnabled, setAutomationEnabled] = useState(true);
+  const [automationStatus, setAutomationStatus] = useState<'ready' | 'initializing' | 'error'>('initializing');
+  const [activeSessions, setActiveSessions] = useState(0);
   
   // Manual add form state
   const [manualTitle, setManualTitle] = useState('');
@@ -25,7 +31,7 @@ function App() {
       startTime: p.startTime,
       endTime: p.endTime,
       link: p.link,
-      platform: p.link.includes('zoom') ? 'zoom' : p.link.includes('teams') ? 'teams' : 'google-meet',
+      platform: automationService.detectPlatform(p.link),
       status: 'pending',
       autoRecord: true // Default to true if user is parsing schedule
     }));
@@ -64,7 +70,7 @@ function App() {
       startTime: new Date(manualStart).toISOString(),
       endTime: new Date(end).toISOString(),
       link: manualLink,
-      platform: 'other',
+      platform: automationService.detectPlatform(manualLink),
       status: 'pending',
       autoRecord: true
     };
@@ -79,6 +85,68 @@ function App() {
     setManualStart('');
     setManualEnd('');
     setShowManualAdd(false);
+  };
+
+  // Automation health monitoring
+  useEffect(() => {
+    const checkAutomationHealth = async () => {
+      try {
+        const health = await automationService.checkHealth();
+        setAutomationStatus(health.status);
+        setActiveSessions(health.activeSessions);
+      } catch (error) {
+        console.error('Automation health check failed:', error);
+        setAutomationStatus('error');
+      }
+    };
+
+    // Check immediately and then every 30 seconds
+    checkAutomationHealth();
+    const healthInterval = setInterval(checkAutomationHealth, 30000);
+
+    return () => clearInterval(healthInterval);
+  }, []);
+
+  // Enhanced meeting join handler
+  const handleMeetingJoin = async (meeting: Meeting) => {
+    if (automationEnabled && automationStatus === 'ready') {
+      try {
+        console.log(`Attempting automated join for: ${meeting.title}`);
+        const result = await automationService.joinMeeting(meeting);
+        
+        if (result.success) {
+          console.log(`✅ Successfully automated join for: ${meeting.title}`);
+          return { success: true, method: 'automated' };
+        } else {
+          console.warn(`❌ Automated join failed for: ${meeting.title}`, result.error);
+          // Fall back to manual join
+          window.open(meeting.link, '_blank');
+          return { success: true, method: 'manual_fallback', error: result.error };
+        }
+      } catch (error) {
+        console.error(`❌ Automation error for: ${meeting.title}`, error);
+        // Fall back to manual join
+        window.open(meeting.link, '_blank');
+        return { success: true, method: 'manual_fallback', error: error };
+      }
+    } else {
+      // Manual join (automation disabled or not ready)
+      console.log(`Manual join for: ${meeting.title} (automation: ${automationEnabled ? automationStatus : 'disabled'})`);
+      window.open(meeting.link, '_blank');
+      return { success: true, method: 'manual' };
+    }
+  };
+
+  // Enhanced meeting leave handler
+  const handleMeetingLeave = async (meeting: Meeting) => {
+    if (automationEnabled && automationStatus === 'ready') {
+      try {
+        await automationService.leaveMeeting(meeting.id);
+        console.log(`Left automated session for: ${meeting.title}`);
+      } catch (error) {
+        console.error(`Error leaving automated session: ${meeting.title}`, error);
+      }
+    }
   };
 
   // The Master Scheduler Loop
@@ -96,8 +164,10 @@ function App() {
           // Check for Start
           // Logic: If within 1 minute of start time (or just passed it) and status is pending
           if (meeting.status === 'pending' && now >= start && now < end) {
-            // Action: Open Link
-            window.open(meeting.link, '_blank');
+            // Action: Join meeting (automated or manual)
+            handleMeetingJoin(meeting).then(result => {
+              console.log(`Meeting join result for ${meeting.title}:`, result);
+            });
             
             // Action: Record if enabled and OBS connected
             if (meeting.autoRecord && obsStatus === OBSStatus.CONNECTED) {
@@ -110,6 +180,9 @@ function App() {
 
           // Check for End
           if (meeting.status === 'active' && now >= end) {
+             // Action: Leave meeting (automated cleanup)
+             handleMeetingLeave(meeting);
+             
              // Action: Stop Record if enabled and OBS connected
              if (meeting.autoRecord && obsStatus === OBSStatus.CONNECTED) {
                stopRecording().catch(err => console.error("Auto-record stop failed", err));
@@ -147,6 +220,46 @@ function App() {
           {/* Left Column: Controls */}
           <div className="lg:col-span-1 space-y-6">
             <OBSConnection status={obsStatus} onStatusChange={setObsStatus} />
+            
+            {/* Automation Control Panel */}
+            <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-full ${automationStatus === 'ready' ? 'bg-green-500/20 text-green-400' : automationStatus === 'error' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                    <Bot size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-100">Meeting Automation</h3>
+                    <p className="text-xs text-gray-400">
+                      {automationStatus === 'ready' ? `Active • ${activeSessions} sessions` : 
+                       automationStatus === 'error' ? 'Service unavailable' : 'Initializing...'}
+                    </p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={automationEnabled}
+                    onChange={(e) => setAutomationEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
+              </div>
+              
+              {automationEnabled && automationStatus === 'error' && (
+                <div className="bg-red-900/20 border border-red-600/20 rounded p-3 text-sm text-red-400">
+                  Automation service unavailable. Meetings will open manually in browser.
+                </div>
+              )}
+              
+              {automationEnabled && automationStatus === 'ready' && (
+                <div className="bg-green-900/20 border border-green-600/20 rounded p-3 text-sm text-green-400">
+                  ✓ Automation ready - meetings will join automatically
+                </div>
+              )}
+            </div>
+            
             <SmartScheduleInput onMeetingsFound={handleMeetingsFound} />
             
             <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">

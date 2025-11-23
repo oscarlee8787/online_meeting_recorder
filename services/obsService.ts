@@ -13,11 +13,17 @@ export const getOBS = (): OBSWebSocket => {
 export const connectOBS = async (address: string, password?: string): Promise<void> => {
   const obs = getOBS();
   try {
+    console.log('🔍 Attempting to connect to:', address, 'with password:', password ? '***' : 'none');
     // Standard default port is 4455 for OBS 28+
     await obs.connect(address, password);
-    console.log('Connected to OBS');
+    console.log('✅ Connected to OBS successfully');
   } catch (error) {
-    console.error('Failed to connect to OBS', error);
+    console.error('❌ Failed to connect to OBS:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      type: typeof error
+    });
     throw error;
   }
 };
