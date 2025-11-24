@@ -1,4 +1,4 @@
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 const logger = require('./logger');
 
 class MeetingAgent {
@@ -10,6 +10,7 @@ class MeetingAgent {
   async initialize() {
     try {
       this.browser = await puppeteer.launch({
+        executablePath: '/usr/bin/chromium',
         headless: false, // Set to true for production
         args: [
           '--no-sandbox',

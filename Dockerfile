@@ -19,8 +19,12 @@ WORKDIR /app
 # Copy package files
 COPY automation/package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies with optimized npm
+RUN npm config set fetch-timeout 600000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm config set fetch-retries 3 && \
+    npm config set registry https://registry.npmjs.org/ && \
+    npm install --omit=dev --no-audit --no-fund
 
 # Copy automation code
 COPY automation/ .
